@@ -1,0 +1,119 @@
+# extends 'layout.html'
+<!DOCTYPE html>
+<html>
+  <head>
+    # block title
+    Time Tracking Management for Trac.11 – ${project.name or 'Trac'}
+    # endblock title
+
+    # block head
+    ${ super() }
+
+    <script type="text/javascript" src="${chrome.htdocs_location}js/wikitoolbar.js"></script>
+    <script type="text/javascript">
+      $(document).ready(function() {
+          $("div.description").find("h1,h2,h3,h4,h5,h6").addAnchor("Link to this section");
+        });
+    </script>
+
+    # endblock head
+  </head>
+
+  <body>
+    <div id="content">
+    # block content
+
+    <form method="post" action="${billing_info.href}"  >
+    <div id="content" class="billing">
+  <a href="${billing_info.usermanual_href}" >${billing_info.usermanual_title}</a>
+  <div id="messages" >
+    # for item in billing_info.messages:
+      <div class="message" >${item}</div>
+    # endfor
+  </div>
+
+  <h1>Report Criteria</h1>
+  <table border="0" cellspacing="0" cellpadding="0" class="minorsection">
+    <tr>
+      <td colspan="2" >
+            <div class="minorsection">
+	    <div class="label" >Billing Status:</div>
+              <label for="billable">Billable: </label>              <input id="billable" name="billable" type="checkbox" checked="true" /> 
+
+            &nbsp;&nbsp;|&nbsp;&nbsp;
+              <label for="unbillable">Not Billable: </label>
+              <input id="unbillable" name="unbillable" type="checkbox"  /> 
+            </div>
+
+	    <div class="minorsection">
+	      <div class="label" >Status:</div>
+          # for status in statuses:
+          # set statusid = status.replace('>','').replace('<','')
+            <label for="${statusid}">${status.capitalize()}: </label>
+            <input id="${statusid}" name="${statusid}" type="checkbox" checked="true" /> 
+          # endfor
+	      <script>
+            # for status in statuses:
+            # set statusid = status.replace('>','').replace('<','')
+               addBillingField("${statusid}", "checkbox", true);
+            # endfor
+	      </script>
+	    </div>
+
+      </td>
+    </tr><tr class="minorsection">
+      <td class="minorsectionleft" valign="top">
+	<label for="startdate" >Start Date:</label>
+	<span class="note">Times are only used for billing reports</span></td>
+      <td class="minorsectionright"><input id="startdate" name="startdate" type="text" /> or:<br />
+          <label for="startbilling" >Choose an old billing date:</label><br />
+          <select id="startbilling" name="startbilling" >
+            <option value="" ></option>
+              # for item in billing_info.billdates:
+                <option value="{$item.value}" >${item.text}</option>
+              # endfor
+          </select>
+      </td>
+    </tr><tr class="minorsection">
+      <td class="minorsectionleft" valign="top"><label for="enddate" >End Date:</label>
+      </td>
+      <td class="minorsectionright">
+          <input id="enddate" name="enddate" type="text" /> or:<br />
+          <label for="endbilling" >Choose an old billing date:</label><br />
+          <select id="endbilling" name="endbilling" >
+            <option value="" ></option>
+              # for item in billing_info.billdates:
+                <option value="${item.value}" >${item.text}</option>
+              # endfor
+          </select>
+      </td>
+    </tr>
+  </table>
+
+  # for key in reports:
+    <div>
+      <h2 class="title">${reports[key]["title"]}</h2>
+      <h6 class="description">${reports[key]["description"]}</h6>
+      <ul>
+        # for report in reports[key]['reports']:
+          <li><a href="" onmouseover="linkify(this, '${billing_info.report_base_href}/${report.id}')"  >
+            ${report.title}
+          </a></li>     
+        # endfor
+      </ul>
+    </div>
+  # endfor
+
+  <label for="newbilltime">New bill time
+    <span class="note">(leave blank for to set to now;  YYYY-MM-DD HH:MM:SS)</span>
+  </label>
+  <input type="text" value="" name="newbilltime" />
+  <input type="submit" name="setbillingtime" value="Set Billing Time" onclick="return confirm('Are you sure that you want to create a billed date?')" />&nbsp;
+
+    </div>
+    </form>
+    </div>
+    ${ super() }
+    # endblock content
+  </body>
+</html>

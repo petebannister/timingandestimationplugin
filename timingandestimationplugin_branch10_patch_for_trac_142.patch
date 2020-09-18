@@ -1,0 +1,356 @@
+Index: timingandestimationplugin/api.py
+===================================================================
+--- timingandestimationplugin/api.py	(revision 17802)
++++ timingandestimationplugin/api.py	(working copy)
+@@ -16,6 +16,8 @@
+ from reports import all_reports
+ from stopwatch import *
+ 
++from pkg_resources import parse_version
++
+ ## report columns
+ ## id|author|title|query|description
+ 
+@@ -192,10 +194,16 @@
+     def do_user_man_update(self):
+         self.log.debug( "T&E Beginning User Manual Upgrade");
+         when = int(time.time())
+-        sql = """
+-        INSERT INTO wiki (name,version,time,author,ipnr,text,comment,readonly)
+-        VALUES ( %s, %s, %s, 'Timing and Estimation Plugin', '127.0.0.1', %s,'',0)
+-        """
++        if parse_version(trac.__version__) > parse_version('1.3'):
++            sql = """
++            INSERT INTO wiki (name,version,time,author,text,comment,readonly)
++            VALUES ( %s, %s, %s, 'Timing and Estimation Plugin', %s,'',0)
++            """
++        else:
++            sql = """
++            INSERT INTO wiki (name,version,time,author,ipnr,text,comment,readonly)
++            VALUES ( %s, %s, %s, 'Timing and Estimation Plugin', '127.0.0.1', %s,'',0)
++            """
+         dbhelper.execute_non_query(self.env, sql,
+                                    user_manual_wiki_title,
+                                    user_manual_version,
+Index: timingandestimationplugin/htdocs/ticket.js
+===================================================================
+--- timingandestimationplugin/htdocs/ticket.js	(revision 17802)
++++ timingandestimationplugin/htdocs/ticket.js	(working copy)
+@@ -26,6 +26,12 @@
+   for(i=0 ; s= to_munge[i] ; i++){
+     $(s).each(function(){ $(this).text(float_to_hours_minutes($(this).text())); });
+   }
++  fth = document.getElementById("field-totalhours");
++  if ( fth ) {
++    //fth.disabled = true;
++    //fth.style.display = 'none';
++    fth.remove();
++  }
+ }
+ 
+ $(document).ready(TandE_ticket_ui_improvements);
+Index: timingandestimationplugin/reports.py
+===================================================================
+--- timingandestimationplugin/reports.py	(revision 17802)
++++ timingandestimationplugin/reports.py	(working copy)
+@@ -168,7 +168,7 @@
+       ELSE CAST( totalhours.value AS DECIMAL(10,2) ) END as Total_work,
+     CASE WHEN billable.value = '1' THEN 'Y' else 'N' END as billable,
+     time AS created, changetime AS modified,         -- ## Dates are formatted
+-    description AS _description_,                    -- ## Uses a full row
++    t.description AS _description_,                  -- ## Uses a full row
+     changetime AS _changetime,
+     reporter AS _reporter
+     ,0 as _ord
+@@ -256,7 +256,7 @@
+             else 'N'
+        END as billable,
+        time AS created, changetime AS modified,         -- ## Dates are formatted
+-       description AS _description_,                    -- ## Uses a full row
++       t.description AS _description_,                  -- ## Uses a full row
+        changetime AS _changetime,
+        reporter AS _reporter
+        ,0 as _ord
+@@ -342,7 +342,7 @@
+             else 'N'
+        END as billable,
+        time AS created, changetime AS modified,         -- ## Dates are formatted
+-       description AS _description_,                    -- ## Uses a full row
++       t.description AS _description_,                  -- ## Uses a full row
+        changetime AS _changetime,
+        reporter AS _reporter
+        ,0 as _ord
+@@ -429,7 +429,7 @@
+          ELSE CAST( totalhours.value AS DECIMAL(10,2) ) END as Total_work,
+        CASE WHEN billable.value = '1' THEN 'Y' else 'N' END as billable,
+        time AS created, changetime AS modified,         -- ## Dates are formatted
+-       description AS _description_,                    -- ## Uses a full row
++       t.description AS _description_,                  -- ## Uses a full row
+        changetime AS _changetime,
+        reporter AS _reporter
+        ,0 as _ord
+@@ -516,7 +516,7 @@
+             else 'N'
+        END as billable,
+        time AS created, changetime AS modified,         -- ## Dates are formatted
+-       description AS _description_,                    -- ## Uses a full row
++       t.description AS _description_,                  -- ## Uses a full row
+        changetime AS _changetime,
+        reporter AS _reporter, 0 as _ord
+ 
+@@ -602,7 +602,7 @@
+             else 'N'
+        END as billable,
+        time AS created, changetime AS modified,         -- ## Dates are formatted
+-       description AS _description_,                    -- ## Uses a full row
++       t.description AS _description_,                  -- ## Uses a full row
+        changetime AS _changetime,
+        reporter AS _reporter
+        ,0 as _ord
+Index: timingandestimationplugin/tande_filters.py
+===================================================================
+--- timingandestimationplugin/tande_filters.py	(revision 17802)
++++ timingandestimationplugin/tande_filters.py	(working copy)
+@@ -1,12 +1,5 @@
+-import re
+-import dbhelper
+-from trac import util
+-from trac.web.api import ITemplateStreamFilter
+ from trac.web.api import IRequestFilter
+ from trac.core import *
+-from genshi.core import *
+-from genshi.builder import tag
+-from genshi.filters.transform import Transformer
+ from trac.web.chrome import add_script
+ 
+ # This can go away once they fix http://genshi.edgewall.org/ticket/136
+@@ -16,59 +9,10 @@
+ # this (using the default filter) I was getting omitted closing tags
+ # for some tags (Based on whitespace afaict)
+ 
+-class FilterTransformation(object):
+-    """Apply a normal stream filter to the selection. The filter is called once
+-    for each contiguous block of marked events."""
+ 
+-    def __init__(self, filter):
+-        """Create the transform.
++# Note: Removed ticket filter; moved field disable/remove to ticket.js
+ 
+-        :param filter: The stream filter to apply.
+-        """
+-        self.filter = filter
+ 
+-    def __call__(self, stream):
+-        """Apply the transform filter to the marked stream.
+-
+-        :param stream: The marked event stream to filter
+-        """
+-        def flush(queue):
+-            if queue:
+-                for event in self.filter(queue):
+-                    yield event
+-                del queue[:]
+-
+-        queue = []
+-        for mark, event in stream:
+-            if mark:
+-                queue.append(event)
+-            else:
+-                for e in flush(queue):
+-                    yield None,e
+-                yield None,event
+-        for event in flush(queue):
+-            yield None,event
+-
+-#@staticmethod
+-def disable_field(field_stream):
+-    value = Stream(field_stream).select('@value').render()
+-    
+-    for kind,data,pos in tag.span(value, id="field-totalhours").generate():
+-        yield kind,data,pos
+-
+-class TotalHoursFilter(Component):
+-    """Disable editing of the Total Hours field so that we don't need Javascript."""
+-    implements(ITemplateStreamFilter)
+-
+-    def match_stream(self, req, method, filename, stream, data):
+-        #self.log.debug("matching: ticket.html")
+-        return filename == 'ticket.html'
+-
+-    def filter_stream(self, req, method, filename, stream, data):
+-        return stream | Transformer(
+-            '//input[@id="field-totalhours" and @type="text" and @name="field_totalhours"]'
+-            ).apply(FilterTransformation(disable_field))
+-
+ class ReportsFilter(Component):
+     """This component Removed rows from the report that require the 
+        management screen to supply values"""
+Index: timingandestimationplugin/templates/billing_jinja.html
+===================================================================
+--- timingandestimationplugin/templates/billing_jinja.html	(nonexistent)
++++ timingandestimationplugin/templates/billing_jinja.html	(working copy)
+@@ -0,0 +1,119 @@
++# extends 'layout.html'
++<!DOCTYPE html>
++<html>
++  <head>
++    # block title
++    Time Tracking Management for Trac.11 – ${project.name or 'Trac'}
++    # endblock title
++
++    # block head
++    ${ super() }
++
++    <script type="text/javascript" src="${chrome.htdocs_location}js/wikitoolbar.js"></script>
++    <script type="text/javascript">
++      $(document).ready(function() {
++          $("div.description").find("h1,h2,h3,h4,h5,h6").addAnchor("Link to this section");
++        });
++    </script>
++
++    # endblock head
++  </head>
++
++  <body>
++    <div id="content">
++    # block content
++
++    <form method="post" action="${billing_info.href}"  >
++    <div id="content" class="billing">
++  <a href="${billing_info.usermanual_href}" >${billing_info.usermanual_title}</a>
++  <div id="messages" >
++    # for item in billing_info.messages:
++      <div class="message" >${item}</div>
++    # endfor
++  </div>
++
++  <h1>Report Criteria</h1>
++  <table border="0" cellspacing="0" cellpadding="0" class="minorsection">
++    <tr>
++      <td colspan="2" >
++            <div class="minorsection">
++	    <div class="label" >Billing Status:</div>
++              <label for="billable">Billable: </label>              <input id="billable" name="billable" type="checkbox" checked="true" /> 
++
++            &nbsp;&nbsp;|&nbsp;&nbsp;
++              <label for="unbillable">Not Billable: </label>
++              <input id="unbillable" name="unbillable" type="checkbox"  /> 
++            </div>
++
++	    <div class="minorsection">
++	      <div class="label" >Status:</div>
++          # for status in statuses:
++          # set statusid = status.replace('>','').replace('<','')
++            <label for="${statusid}">${status.capitalize()}: </label>
++            <input id="${statusid}" name="${statusid}" type="checkbox" checked="true" /> 
++          # endfor
++	      <script>
++            # for status in statuses:
++            # set statusid = status.replace('>','').replace('<','')
++               addBillingField("${statusid}", "checkbox", true);
++            # endfor
++	      </script>
++	    </div>
++
++      </td>
++    </tr><tr class="minorsection">
++      <td class="minorsectionleft" valign="top">
++	<label for="startdate" >Start Date:</label>
++	<span class="note">Times are only used for billing reports</span></td>
++      <td class="minorsectionright"><input id="startdate" name="startdate" type="text" /> or:<br />
++          <label for="startbilling" >Choose an old billing date:</label><br />
++          <select id="startbilling" name="startbilling" >
++            <option value="" ></option>
++              # for item in billing_info.billdates:
++                <option value="{$item.value}" >${item.text}</option>
++              # endfor
++          </select>
++      </td>
++    </tr><tr class="minorsection">
++      <td class="minorsectionleft" valign="top"><label for="enddate" >End Date:</label>
++      </td>
++      <td class="minorsectionright">
++          <input id="enddate" name="enddate" type="text" /> or:<br />
++          <label for="endbilling" >Choose an old billing date:</label><br />
++          <select id="endbilling" name="endbilling" >
++            <option value="" ></option>
++              # for item in billing_info.billdates:
++                <option value="${item.value}" >${item.text}</option>
++              # endfor
++          </select>
++      </td>
++    </tr>
++  </table>
++
++  # for key in reports:
++    <div>
++      <h2 class="title">${reports[key]["title"]}</h2>
++      <h6 class="description">${reports[key]["description"]}</h6>
++      <ul>
++        # for report in reports[key]['reports']:
++          <li><a href="" onmouseover="linkify(this, '${billing_info.report_base_href}/${report.id}')"  >
++            ${report.title}
++          </a></li>     
++        # endfor
++      </ul>
++    </div>
++  # endfor
++
++  <label for="newbilltime">New bill time
++    <span class="note">(leave blank for to set to now;  YYYY-MM-DD HH:MM:SS)</span>
++  </label>
++  <input type="text" value="" name="newbilltime" />
++  <input type="submit" name="setbillingtime" value="Set Billing Time" onclick="return confirm('Are you sure that you want to create a billed date?')" />&nbsp;
++
++    </div>
++    </form>
++    </div>
++    ${ super() }
++    # endblock content
++  </body>
++</html>
+Index: timingandestimationplugin/ticket_daemon.py
+===================================================================
+--- timingandestimationplugin/ticket_daemon.py	(revision 17802)
++++ timingandestimationplugin/ticket_daemon.py	(working copy)
+@@ -1,4 +1,5 @@
+-from trac.ticket import ITicketChangeListener, Ticket, ITicketManipulator
++from trac.ticket import Ticket
++from trac.ticket.api import ITicketChangeListener, ITicketManipulator
+ from trac.core import *
+ import datetime
+ import dbhelper
+Index: timingandestimationplugin/webui.py
+===================================================================
+--- timingandestimationplugin/webui.py	(revision 17802)
++++ timingandestimationplugin/webui.py	(working copy)
+@@ -9,7 +9,7 @@
+ from trac.web import IRequestHandler
+ from trac.util import Markup
+ from trac.web.chrome import add_stylesheet, add_script, \
+-     INavigationContributor, ITemplateProvider
++     INavigationContributor, ITemplateProvider, Chrome
+ from trac.web.href import Href
+ from reportmanager import CustomReportManager
+ from statuses import get_statuses
+@@ -152,7 +152,10 @@
+         add_stylesheet(req, "billing/billingplugin.css")
+         add_script(req, "billing/date.js")
+         add_script(req, "billing/linkifyer.js")
+-        return 'billing.html', data, None
++        if hasattr(Chrome(self.env), 'jenv'):
++            return 'billing_jinja.html', data
++        else:
++            return 'billing.html', data, None
+ 
+ 
+     # ITemplateProvider
+@@ -164,7 +167,7 @@
+ 
+     def get_templates_dirs(self):
+         """Return the absolute path of the directory containing the provided
+-        genshi templates.
++        templates.
+         """
+         rtn = [resource_filename(__name__, 'templates')]
+         return rtn
